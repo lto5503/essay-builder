@@ -9,7 +9,7 @@ st.set_page_config(page_title="에듀씽크 AI 플랫폼", page_icon="🎓", lay
 SUBMISSION_FILE = "submissions.csv"
 RUBRIC_FILE = "rubrics.csv"
 
-# --- [API 키 자동 로드 (화면 노출 없음)] ---
+# --- [API 키 자동 로드] ---
 api_connected = False
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -33,6 +33,16 @@ if not os.path.exists(RUBRIC_FILE):
     ])
     df_init_rubric.to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
 
+def reset_student_session():
+    st.session_state.step = 1
+    st.session_state.claim = ""
+    st.session_state.reason = ""
+    st.session_state.counter = ""
+    st.session_state.draft_1 = ""
+    st.session_state.socratic_question = ""
+    st.session_state.final_draft = ""
+    st.session_state.growth_report = ""
+
 # --- [사이드바 메뉴] ---
 with st.sidebar:
     st.title("🎓 에듀씽크 센터")
@@ -55,9 +65,26 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
 
     df_rubrics = pd.read_csv(RUBRIC_FILE)
     topic_list = df_rubrics["title"].tolist()
-    selected_topic = st.selectbox("📌 오늘 도전할 논제를 선택하세요:", topic_list)
-    current_rubric = df_rubrics[df_rubrics["title"] == selected_topic].iloc[0]
+    
+    col_t1, col_t2 = st.columns([4, 1])
+    with col_t1:
+        selected_topic = st.selectbox("📌 오늘 도전할 논제를 선택하세요:", topic_list, key="selected_topic_box")
+    with col_t2:
+        st.write("")
+        st.write("")
+        if st.button("🔄 처음부터 쓰기"):
+            reset_student_session()
+            st.rerun()
 
+    # 주제가 변경되면 단계 자동 초기화
+    if "current_active_topic" not in st.session_state:
+        st.session_state.current_active_topic = selected_topic
+    elif st.session_state.current_active_topic != selected_topic:
+        st.session_state.current_active_topic = selected_topic
+        reset_student_session()
+        st.rerun()
+
+    current_rubric = df_rubrics[df_rubrics["title"] == selected_topic].iloc[0]
     st.info(f"**💡 글쓰기 목표 기준:** {current_rubric['criteria']}")
 
     if "step" not in st.session_state:
@@ -184,24 +211,30 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
         st.info(f"**🌟 AI 성장 분석표:**\n\n{st.session_state.growth_report}")
         
         student_name = st.text_input("학생 이름을 입력하고 제출하세요:")
-        if st.button("📤 최종 제출하기"):
-            if student_name.strip():
-                new_row = {
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "student_name": student_name,
-                    "topic": selected_topic,
-                    "final_draft": st.session_state.final_draft,
-                    "growth_report": st.session_state.growth_report
-                }
-                df_sub = pd.DataFrame([new_row])
-                if os.path.exists(SUBMISSION_FILE):
-                    df_sub.to_csv(SUBMISSION_FILE, mode='a', header=False, index=False, encoding='utf-8-sig')
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("📤 최종 제출하기"):
+                if student_name.strip():
+                    new_row = {
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "student_name": student_name,
+                        "topic": selected_topic,
+                        "final_draft": st.session_state.final_draft,
+                        "growth_report": st.session_state.growth_report
+                    }
+                    df_sub = pd.DataFrame([new_row])
+                    if os.path.exists(SUBMISSION_FILE):
+                        df_sub.to_csv(SUBMISSION_FILE, mode='a', header=False, index=False, encoding='utf-8-sig')
+                    else:
+                        df_sub.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
+                    st.success("🎉 성공적으로 제출되었습니다!")
+                    st.balloons()
                 else:
-                    df_sub.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
-                st.success("🎉 성공적으로 제출되었습니다!")
-                st.balloons()
-            else:
-                st.error("이름을 입력해 주세요!")
+                    st.error("이름을 입력해 주세요!")
+        with c2:
+            if st.button("✨ 다른 논제 도전하기 (처음으로)"):
+                reset_student_session()
+                st.rerun()
 
 # ==============================================================================
 # 프로그램 2: [선생님] Agent C 루브릭 금고
@@ -236,7 +269,7 @@ elif menu == "🧠 [선생님] Agent C 루브릭 금고":
                 }
                 df_updated = pd.concat([df_rubrics, pd.DataFrame([new_data])], ignore_index=True)
                 df_updated.to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
-                st.success("루브릭이 저장되었습니다.")
+                st.success("루브릭이 저장되었습니다! 이제 학생 글쓰기 화면에서 바로 선택할 수 있습니다.")
                 st.rerun()
             else:
                 st.error("모든 항목을 입력해 주세요.")
