@@ -237,7 +237,7 @@ elif menu == "🏆 [학급] 생각 나눔 & 오늘의 작가":
         st.markdown("---")
         st.header("🎉 오늘의 작가 & 행운의 사다리 타기")
         c_p1, c_p2 = st.columns([1, 2])
-        with c_p1: num_winners = st.number_input("몇 명을 뽑을까요?", min_value=1, max_value=len(f_df) if len(f_df)>0 else 1, value=3)
+        with c_p1: num_winners = st.number_input("몇 명을 뽑을까요?", min_value=1, max_value=len(f_df) if len(f_df)>0 else 1, value=min(3, max(1, len(f_df))))
         with c_p2: prizes_input = st.text_input("🎁 선물 목록", value="초코파이, 사탕, 마이구미")
         if st.button("🚀 오늘의 작가 발표 및 사다리 타기 시작!", type="primary"):
             f_df['numeric_score'] = pd.to_numeric(f_df['score'], errors='coerce').fillna(0)
