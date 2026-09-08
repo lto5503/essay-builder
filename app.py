@@ -54,6 +54,20 @@ def reset_student_session():
         if key in st.session_state:
             del st.session_state[key]
 
+# --- [이전 단계 확인 및 수정 UI 컴포넌트] ---
+def show_previous_steps(current_step):
+    st.markdown("<br>", unsafe_allow_html=True)
+    if current_step > 1:
+        with st.expander("📌 [1단계] 나의 주장 (클릭하여 확인 및 수정)", expanded=False):
+            st.session_state.claim = st.text_input("1단계 수정:", value=st.session_state.get("claim", ""), key=f"edit_claim_{current_step}")
+    if current_step > 2:
+        with st.expander("💡 [2단계] 나의 근거 (클릭하여 확인 및 수정)", expanded=False):
+            st.session_state.reason = st.text_area("2단계 수정:", value=st.session_state.get("reason", ""), height=80, key=f"edit_reason_{current_step}")
+    if current_step > 3:
+        with st.expander("🛡️ [3단계] 반론 극복 (클릭하여 확인 및 수정)", expanded=False):
+            st.session_state.counter = st.text_area("3단계 수정:", value=st.session_state.get("counter", ""), height=80, key=f"edit_counter_{current_step}")
+    st.markdown("<br>", unsafe_allow_html=True)
+
 # --- [사이드바 메뉴] ---
 with st.sidebar:
     st.title("🎓 에듀씽크 센터")
@@ -115,7 +129,7 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
 
     elif st.session_state.step == 2:
         st.subheader("💡 2단계: 주장을 뒷받침할 근거 대기")
-        st.write(f"**나의 주장:** {st.session_state.get('claim', '')}")
+        show_previous_steps(2) # 이전 단계(1단계) 표시
         reason = st.text_area("왜 그렇게 생각하나요?", value=st.session_state.get("reason", ""), height=100)
         c1, c2 = st.columns(2)
         with c1:
@@ -129,6 +143,7 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
 
     elif st.session_state.step == 3:
         st.subheader("🛡️ 3단계: 반대 의견 생각하고 극복하기")
+        show_previous_steps(3) # 이전 단계(1, 2단계) 표시
         counter = st.text_area("반대 의견과 그것을 넘어설 나의 생각은?", value=st.session_state.get("counter", ""), height=100)
         c1, c2 = st.columns(2)
         with c1:
@@ -153,6 +168,7 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
 
     elif st.session_state.step == 4:
         st.subheader("🚀 4단계: 생각을 더 깊게 다듬기")
+        show_previous_steps(4) # 이전 단계(1, 2, 3단계) 표시
         st.warning(f"**🤖 AI 질문:** {st.session_state.get('socratic_question', '')}")
         final_draft = st.text_area("완성된 글 다듬기:", height=150, value=st.session_state.get("final_draft", ""))
         c1, c2 = st.columns(2)
@@ -179,7 +195,6 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
                             """
                             eval_resp = model.generate_content(eval_prompt).text
                             
-                            # 정규식으로 점수 추출
                             score_match = re.search(r'\[최종점수\]:\s*(\d+)', eval_resp)
                             st.session_state.ai_score = score_match.group(1) if score_match else "채점불가"
                             
@@ -191,7 +206,6 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
 
     elif st.session_state.step == 5:
         st.subheader("📜 5단계: 나의 생각 최종본 및 제출")
-        # Session State 안전 호출망(.get) 적용
         safe_final_draft = st.session_state.get('final_draft', '')
         safe_ai_score = st.session_state.get('ai_score', '진행 중')
         safe_growth_report = st.session_state.get('growth_report', '분석 중입니다.')
