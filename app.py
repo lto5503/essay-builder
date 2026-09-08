@@ -3,45 +3,56 @@ import google.generativeai as genai
 import pandas as pd
 from datetime import datetime
 import os
+import re
 
 st.set_page_config(page_title="에듀씽크 AI 플랫폼", page_icon="🎓", layout="wide")
 
 SUBMISSION_FILE = "submissions.csv"
 RUBRIC_FILE = "rubrics.csv"
+SCHOOL_FILE = "schools.csv"
 
-# --- [API 키 자동 로드] ---
+# --- [API 키 설정] ---
 api_connected = False
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     api_connected = True
 
-# --- [초기 루브릭 파일 세팅] ---
+# --- [초기 파일 세팅 및 스키마 업데이트 (하위 호환)] ---
+if not os.path.exists(SCHOOL_FILE):
+    pd.DataFrame({"school_name": ["좌야초등학교", "왕지초등학교", "신대초등학교"]}).to_csv(SCHOOL_FILE, index=False, encoding='utf-8-sig')
+
 if not os.path.exists(RUBRIC_FILE):
     df_init_rubric = pd.DataFrame([
         {
             "id": 1,
             "title": "초등 5-6학년: 교내 스마트폰 자율 사용 찬반",
             "good_example": "스마트폰 자율 사용을 허용해야 한다. 디지털 학습 도구로 활용할 수 있고 자기 조절 능력을 기를 수 있기 때문이다. 물론 중독 우려도 있지만 규칙을 정하면 해결된다.",
-            "criteria": "1) 주장 명확성 2) 구체적 근거 2가지 제시 3) 반론 수용 및 대안 제시"
-        },
-        {
-            "id": 2,
-            "title": "초등 3-4학년: 환경 보호를 위한 일회용품 제한",
-            "good_example": "학교 급식실에서 일회용품 사용을 줄여야 한다. 쓰레기가 썩는 데 수백 년이 걸리기 때문이다. 설거지가 번거롭더라도 다회용기를 써야 한다.",
-            "criteria": "1) 일상 실천 가능성 2) 환경 파괴 인과관계 설명 3) 쉬운 어휘 사용"
+            "criteria": "1) 주장 명확성 2) 구체적 근거 2가지 제시 3) 반론 수용 및 대안 제시",
+            "scoring_criteria": "주장의 명확성(30점), 근거의 타당성(40점), 맞춤법 및 분량(30점)"
         }
     ])
     df_init_rubric.to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
+else:
+    df_r = pd.read_csv(RUBRIC_FILE)
+    if 'scoring_criteria' not in df_r.columns:
+        df_r['scoring_criteria'] = "논리성(40점), 창의성(30점), 표현력(30점)"
+        df_r.to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
+
+if os.path.exists(SUBMISSION_FILE):
+    df_s = pd.read_csv(SUBMISSION_FILE)
+    changed = False
+    for col in ['school', 'grade', 'class_num', 'score']:
+        if col not in df_s.columns:
+            df_s[col] = "-"
+            changed = True
+    if changed:
+        df_s.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
 
 def reset_student_session():
     st.session_state.step = 1
-    st.session_state.claim = ""
-    st.session_state.reason = ""
-    st.session_state.counter = ""
-    st.session_state.draft_1 = ""
-    st.session_state.socratic_question = ""
-    st.session_state.final_draft = ""
-    st.session_state.growth_report = ""
+    for key in ['claim', 'reason', 'counter', 'draft_1', 'socratic_question', 'final_draft', 'growth_report', 'ai_score']:
+        if key in st.session_state:
+            del st.session_state[key]
 
 # --- [사이드바 메뉴] ---
 with st.sidebar:
@@ -52,23 +63,22 @@ with st.sidebar:
     )
     st.markdown("---")
     if api_connected:
-        st.success("🟢 AI 학습 엔진 정상 가동 중")
+        st.success("🟢 AI 학습 엔진 가동 중")
     else:
-        st.error("🔴 AI 엔진 설정이 필요합니다 (.streamlit/secrets.toml)")
+        st.error("🔴 AI 엔진 설정 필요")
 
 # ==============================================================================
-# 프로그램 1: [학생] 생각 징검다리 글쓰기
+# 1. [학생] 생각 징검다리
 # ==============================================================================
 if menu == "📝 [학생] 생각 징검다리 글쓰기":
     st.header("📝 생각 징검다리: 서논술형 쓰기 훈련")
-    st.caption("주제에 맞춰 한 단계씩 생각을 징검다리처럼 건너보세요.")
-
+    
     df_rubrics = pd.read_csv(RUBRIC_FILE)
-    topic_list = df_rubrics["title"].tolist()
+    df_schools = pd.read_csv(SCHOOL_FILE)
     
     col_t1, col_t2 = st.columns([4, 1])
     with col_t1:
-        selected_topic = st.selectbox("📌 오늘 도전할 논제를 선택하세요:", topic_list, key="selected_topic_box")
+        selected_topic = st.selectbox("📌 논제 선택:", df_rubrics["title"].tolist(), key="selected_topic_box")
     with col_t2:
         st.write("")
         st.write("")
@@ -76,7 +86,6 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
             reset_student_session()
             st.rerun()
 
-    # 주제가 변경되면 단계 자동 초기화
     if "current_active_topic" not in st.session_state:
         st.session_state.current_active_topic = selected_topic
     elif st.session_state.current_active_topic != selected_topic:
@@ -85,140 +94,129 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
         st.rerun()
 
     current_rubric = df_rubrics[df_rubrics["title"] == selected_topic].iloc[0]
-    st.info(f"**💡 글쓰기 목표 기준:** {current_rubric['criteria']}")
+    scoring_crit = current_rubric.get("scoring_criteria", "논리성, 표현력 종합 평가")
 
     if "step" not in st.session_state:
         st.session_state.step = 1
 
-    steps = ["1. 주장 세우기", "2. 근거 제시", "3. 반론 극복", "4. AI 핑퐁 질문", "5. 다듬기 및 제출"]
+    steps = ["1. 주장", "2. 근거", "3. 반론 극복", "4. AI 질문", "5. 다듬기 및 제출"]
     st.progress(st.session_state.step / 5)
-    st.caption(f"진행 단계: **{steps[st.session_state.step - 1]}**")
 
-    # Step 1: 주장
     if st.session_state.step == 1:
-        st.subheader("🎯 1단계: 나의 입장(주장) 밝히기")
-        claim = st.text_input("이 문제에 대해 어떻게 생각하나요?", value=st.session_state.get("claim", ""), placeholder="나는 ~라고 생각한다.")
+        st.subheader("🎯 1단계: 나의 입장 밝히기")
+        claim = st.text_input("어떻게 생각하나요?", value=st.session_state.get("claim", ""))
         if st.button("다음 단계 ➡️"):
             if claim.strip():
                 st.session_state.claim = claim
                 st.session_state.step = 2
                 st.rerun()
             else:
-                st.error("입장을 한 줄로 적어주세요!")
+                st.error("입장을 적어주세요!")
 
-    # Step 2: 근거
     elif st.session_state.step == 2:
-        st.subheader("💡 2단계: 주장을 뒷받침할 구체적 근거 대기")
+        st.subheader("💡 2단계: 주장을 뒷받침할 근거 대기")
         st.write(f"**나의 주장:** {st.session_state.claim}")
-        reason = st.text_area("왜 그렇게 생각하나요? 2가지 이상의 이유를 적어보세요.", value=st.session_state.get("reason", ""), height=100)
+        reason = st.text_area("왜 그렇게 생각하나요?", value=st.session_state.get("reason", ""), height=100)
         c1, c2 = st.columns(2)
         with c1:
             if st.button("⬅️ 이전"):
-                st.session_state.step = 1
-                st.rerun()
+                st.session_state.step = 1; st.rerun()
         with c2:
             if st.button("다음 단계 ➡️"):
                 if reason.strip():
                     st.session_state.reason = reason
-                    st.session_state.step = 3
-                    st.rerun()
+                    st.session_state.step = 3; st.rerun()
 
-    # Step 3: 반론 극복
     elif st.session_state.step == 3:
         st.subheader("🛡️ 3단계: 반대 의견 생각하고 극복하기")
-        counter = st.text_area("반대하는 친구들의 생각과 그것을 넘어설 나의 생각은?", value=st.session_state.get("counter", ""), height=100)
+        counter = st.text_area("반대 의견과 그것을 넘어설 나의 생각은?", value=st.session_state.get("counter", ""), height=100)
         c1, c2 = st.columns(2)
         with c1:
             if st.button("⬅️ 이전"):
-                st.session_state.step = 2
-                st.rerun()
+                st.session_state.step = 2; st.rerun()
         with c2:
             if st.button("AI 소크라테스 코치에게 검단받기 ✨"):
                 if not counter.strip():
-                    st.error("반대 의견에 대한 생각을 적어주세요!")
-                elif not api_connected:
-                    st.error("AI 엔진 키 설정이 되어있지 않습니다.")
+                    st.error("반대 의견을 적어주세요!")
                 else:
                     st.session_state.counter = counter
-                    draft_text = f"주장: {st.session_state.claim}\n근거: {st.session_state.reason}\n반론: {st.session_state.counter}"
-                    st.session_state.draft_1 = draft_text
-
-                    with st.spinner("AI 튜터가 글의 논리를 정밀 분석 중입니다..."):
+                    st.session_state.draft_1 = f"주장: {st.session_state.claim}\n근거: {st.session_state.reason}\n반론: {st.session_state.counter}"
+                    with st.spinner("논리 분석 중..."):
                         try:
-                            model = genai.GenerativeModel('gemini-3.5-flash-lite', generation_config={'max_output_tokens': 300, 'temperature': 0.7})
-                            prompt = f"""
-                            당신은 초등학생의 논리적 사고를 키워주는 소크라테스 교사입니다.
-                            [교사 기준/루브릭]: {current_rubric['criteria']}
-                            [모범 사례]: {current_rubric['good_example']}
-                            
-                            [학생이 쓴 글]:
-                            {draft_text}
-
-                            지침:
-                            1. 절대 정답을 바로 써주거나 대신 고쳐주지 마세요.
-                            2. 글에서 가장 논리가 부족한 결손 지점을 파악하세요.
-                            3. 학생이 생각을 넓히고 보완할 수 있는 다정한 꼬리 질문 1개를 2문장 이내로 작성하세요.
-                            """
-                            resp = model.generate_content(prompt)
-                            st.session_state.socratic_question = resp.text
+                            model = genai.GenerativeModel('gemini-3.5-flash-lite', generation_config={'max_output_tokens': 200, 'temperature': 0.7})
+                            prompt = f"소크라테스 교사로서 다음 글의 논리적 결손을 파악하고, 학생이 생각을 보완할 수 있는 다정한 꼬리 질문 1개를 2문장 이내로 작성하세요.\n[글]: {st.session_state.draft_1}"
+                            st.session_state.socratic_question = model.generate_content(prompt).text
                             st.session_state.step = 4
                             st.rerun()
                         except Exception as e:
-                            st.error(f"AI 통신 오류: {e}")
+                            st.error(f"오류: {e}")
 
-    # Step 4: 다듬기
     elif st.session_state.step == 4:
         st.subheader("🚀 4단계: 생각을 더 깊게 다듬기")
-        st.warning(f"**🤖 소크라테스 튜터의 생각 질문:**\n\n{st.session_state.socratic_question}")
-        st.markdown("위 질문에 대한 생각을 보태어, 전체 글을 자연스러운 한 편의 완성문으로 다듬어 보세요.")
-        
+        st.warning(f"**🤖 AI 질문:** {st.session_state.socratic_question}")
         final_draft = st.text_area("완성된 글 다듬기:", height=150, value=st.session_state.get("final_draft", ""))
         c1, c2 = st.columns(2)
         with c1:
             if st.button("⬅️ 이전"):
-                st.session_state.step = 3
-                st.rerun()
+                st.session_state.step = 3; st.rerun()
         with c2:
-            if st.button("최종 완성 및 성장 분석 📈"):
-                if not final_draft.strip():
-                    st.error("완성된 글을 작성해 주세요!")
-                else:
+            if st.button("최종 완성 및 AI 채점 📈"):
+                if final_draft.strip():
                     st.session_state.final_draft = final_draft
-                    with st.spinner("AI가 초안 대비 성장을 분석 중입니다..."):
+                    with st.spinner("AI가 배점 기준에 따라 채점 및 분석 중입니다..."):
                         try:
-                            model = genai.GenerativeModel('gemini-3.5-flash-lite', generation_config={'max_output_tokens': 300, 'temperature': 0.7})
+                            model = genai.GenerativeModel('gemini-3.5-flash-lite', generation_config={'max_output_tokens': 300, 'temperature': 0.3})
                             eval_prompt = f"""
-                            초등학생의 글쓰기 수정 전/후 성장 보고서를 작성해 주세요.
+                            초등학생 글쓰기 성장 보고서 및 채점을 진행하세요.
                             [초안]: {st.session_state.draft_1}
                             [수정본]: {st.session_state.final_draft}
-                            [교사 기준]: {current_rubric['criteria']}
+                            [채점 기준(100점 만점)]: {scoring_crit}
 
-                            출력 형식:
-                            1. 성장한 점 (어떤 근거나 설명이 보강되었는지 구체적 칭찬)
-                            2. 종합 격려 (한 문장)
+                            출력형식:
+                            [성장한점]: (구체적 칭찬)
+                            [종합격려]: (한 문장)
+                            [최종점수]: (숫자만 작성. 예: 85)
                             """
-                            eval_resp = model.generate_content(eval_prompt)
-                            st.session_state.growth_report = eval_resp.text
+                            eval_resp = model.generate_content(eval_prompt).text
+                            
+                            # 정규식으로 점수 추출
+                            score_match = re.search(r'\[최종점수\]:\s*(\d+)', eval_resp)
+                            st.session_state.ai_score = score_match.group(1) if score_match else "채점불가"
+                            
+                            st.session_state.growth_report = eval_resp.replace(f"[최종점수]: {st.session_state.ai_score}", "").strip()
                             st.session_state.step = 5
                             st.rerun()
                         except Exception as e:
-                            st.error(f"통신 오류: {e}")
+                            st.error(f"오류: {e}")
 
-    # Step 5: 최종 제출
     elif st.session_state.step == 5:
-        st.subheader("📜 5단계: 나의 생각 최종본 및 성장 리포트")
-        st.success(f"**내가 완성한 글:**\n\n{st.session_state.final_draft}")
-        st.info(f"**🌟 AI 성장 분석표:**\n\n{st.session_state.growth_report}")
+        st.subheader("📜 5단계: 나의 생각 최종본 및 제출")
+        st.success(f"**완성글:**\n{st.session_state.final_draft}")
+        st.info(f"**🌟 AI 분석 (AI 채점: {st.session_state.ai_score}점):**\n{st.session_state.growth_report}")
         
-        student_name = st.text_input("학생 이름을 입력하고 제출하세요:")
+        st.markdown("### 📝 제출자 정보 입력")
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        with sc1:
+            school = st.selectbox("학교", df_schools['school_name'].tolist())
+        with sc2:
+            grade = st.selectbox("학년", [str(i)+"학년" for i in range(1, 7)])
+        with sc3:
+            class_num = st.selectbox("반", [str(i)+"반" for i in range(1, 16)])
+        with sc4:
+            student_name = st.text_input("이름")
+
         c1, c2 = st.columns([1, 1])
         with c1:
             if st.button("📤 최종 제출하기"):
                 if student_name.strip():
                     new_row = {
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "school": school,
+                        "grade": grade,
+                        "class_num": class_num,
                         "student_name": student_name,
                         "topic": selected_topic,
+                        "score": st.session_state.ai_score,
                         "final_draft": st.session_state.final_draft,
                         "growth_report": st.session_state.growth_report
                     }
@@ -232,63 +230,87 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
                 else:
                     st.error("이름을 입력해 주세요!")
         with c2:
-            if st.button("✨ 다른 논제 도전하기 (처음으로)"):
+            if st.button("✨ 다른 논제 도전하기"):
                 reset_student_session()
                 st.rerun()
 
 # ==============================================================================
-# 프로그램 2: [선생님] Agent C 루브릭 금고
+# 2. [선생님] Agent C 루브릭 금고
 # ==============================================================================
 elif menu == "🧠 [선생님] Agent C 루브릭 금고":
     st.header("🧠 Agent C: 기준 학습용 루브릭 금고")
-    st.caption("AI의 Few-Shot 평가 기준(논제, 모범 답안, 평가 루브릭)을 등록하고 관리합니다.")
-
     tab1, tab2 = st.tabs(["📋 등록된 루브릭 목록", "➕ 신규 루브릭 등록"])
     df_rubrics = pd.read_csv(RUBRIC_FILE)
 
     with tab1:
-        st.subheader(f"등록된 루브릭: 총 {len(df_rubrics)}건")
         for _, row in df_rubrics.iterrows():
             with st.expander(f"📌 [{row['id']}] {row['title']}"):
-                st.markdown(f"**🎯 채점 기준 (Rubric):**\n{row['criteria']}")
-                st.markdown(f"**📝 모범 답안:**\n{row['good_example']}")
+                st.markdown(f"**🎯 방향성 기준:** {row['criteria']}")
+                st.markdown(f"**💯 100점 배점 기준:** {row.get('scoring_criteria', '미설정')}")
+                st.markdown(f"**📝 모범 답안:** {row['good_example']}")
 
     with tab2:
-        st.subheader("새로운 논제 등록")
         new_title = st.text_input("논제/주제명")
-        new_criteria = st.text_area("평가 기준 (AI가 지킬 규칙)")
+        new_criteria = st.text_area("평가 기준 (AI 꼬리 질문용 방향성)")
+        new_scoring = st.text_input("채점 배점표 (예: 논리성 40점, 창의성 30점, 맞춤법 30점)")
         new_example = st.text_area("모범 답안 (Few-Shot 예시)")
 
-        if st.button("💾 루브릭 금고에 저장"):
-            if new_title and new_criteria and new_example:
-                new_data = {
-                    "id": len(df_rubrics) + 1,
-                    "title": new_title,
-                    "good_example": new_example,
-                    "criteria": new_criteria
-                }
-                df_updated = pd.concat([df_rubrics, pd.DataFrame([new_data])], ignore_index=True)
-                df_updated.to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
-                st.success("루브릭이 저장되었습니다! 이제 학생 글쓰기 화면에서 바로 선택할 수 있습니다.")
+        if st.button("💾 루브릭 저장"):
+            if new_title and new_criteria and new_scoring:
+                new_data = {"id": len(df_rubrics) + 1, "title": new_title, "good_example": new_example, "criteria": new_criteria, "scoring_criteria": new_scoring}
+                pd.concat([df_rubrics, pd.DataFrame([new_data])], ignore_index=True).to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
+                st.success("저장 완료!")
                 st.rerun()
-            else:
-                st.error("모든 항목을 입력해 주세요.")
 
 # ==============================================================================
-# 프로그램 3: [선생님] 제출 현황
+# 3. [선생님] 제출 현황 및 학교 관리
 # ==============================================================================
 elif menu == "📊 [선생님] 학생 제출 및 채점 현황":
-    st.header("📊 학생 제출 및 AI 성장 리포트")
-    if os.path.exists(SUBMISSION_FILE):
-        df_submissions = pd.read_csv(SUBMISSION_FILE)
-        st.write(f"총 제출: **{len(df_submissions)}건**")
-        st.dataframe(df_submissions, use_container_width=True)
-        csv_download = df_submissions.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 CSV 다운로드",
-            data=csv_download,
-            file_name=f"student_reports_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
-    else:
-        st.info("제출된 답안이 없습니다.")
+    st.header("📊 제출 현황 및 설정")
+    
+    tab_dash, tab_school = st.tabs(["📈 채점 대시보드", "🏫 학교 목록 관리"])
+    
+    with tab_school:
+        st.subheader("등록된 학교 목록")
+        df_schools = pd.read_csv(SCHOOL_FILE)
+        st.write(", ".join(df_schools['school_name'].tolist()))
+        
+        new_school = st.text_input("새로운 학교 이름 추가 (예: 순천남초등학교)")
+        if st.button("➕ 학교 추가"):
+            if new_school.strip() and new_school not in df_schools['school_name'].values:
+                pd.concat([df_schools, pd.DataFrame([{"school_name": new_school}])], ignore_index=True).to_csv(SCHOOL_FILE, index=False, encoding='utf-8-sig')
+                st.success(f"'{new_school}' 추가 완료!")
+                st.rerun()
+
+    with tab_dash:
+        if os.path.exists(SUBMISSION_FILE):
+            df_submissions = pd.read_csv(SUBMISSION_FILE)
+            
+            st.markdown("### 🔍 정밀 검색 필터")
+            f1, f2, f3, f4 = st.columns(4)
+            with f1:
+                sch_filter = st.selectbox("학교", ["전체"] + list(df_submissions['school'].unique()))
+            with f2:
+                grd_filter = st.selectbox("학년", ["전체"] + list(df_submissions['grade'].unique()))
+            with f3:
+                cls_filter = st.selectbox("반", ["전체"] + list(df_submissions['class_num'].unique()))
+            with f4:
+                name_filter = st.text_input("이름 검색")
+
+            filtered_df = df_submissions.copy()
+            if sch_filter != "전체": filtered_df = filtered_df[filtered_df['school'] == sch_filter]
+            if grd_filter != "전체": filtered_df = filtered_df[filtered_df['grade'] == grd_filter]
+            if cls_filter != "전체": filtered_df = filtered_df[filtered_df['class_num'] == cls_filter]
+            if name_filter: filtered_df = filtered_df[filtered_df['student_name'].str.contains(name_filter)]
+
+            st.write(f"검색 결과: **{len(filtered_df)}건**")
+            st.dataframe(filtered_df, use_container_width=True)
+            
+            st.download_button(
+                label="📥 필터링된 결과 CSV 다운로드",
+                data=filtered_df.to_csv(index=False).encode('utf-8-sig'),
+                file_name=f"student_reports_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("제출된 답안이 없습니다.")
