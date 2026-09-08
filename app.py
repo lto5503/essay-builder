@@ -19,16 +19,11 @@ if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     api_connected = True
 
-# --- [동시 접속 안전 CSV 로드 및 저장 함수] ---
 def load_csv_safe(file_path):
     if not os.path.exists(file_path): return None
-    try:
-        df = pd.read_csv(file_path)
-        return df
-    except pd.errors.EmptyDataError:
-        return None
-    except Exception:
-        return None
+    try: return pd.read_csv(file_path)
+    except pd.errors.EmptyDataError: return None
+    except Exception: return None
 
 def append_submission_safe(row_dict):
     df_new = pd.DataFrame([row_dict])
@@ -37,10 +32,10 @@ def append_submission_safe(row_dict):
         df_new.to_csv(SUBMISSION_FILE, mode='a', header=not file_exists, index=False, encoding='utf-8-sig')
         return True
     except Exception as e:
-        st.error(f"저장 중 동시성 지연 발생: {e}")
+        st.error(f"저장 오류: {e}")
         return False
 
-# --- [초기 파일 세팅] ---
+# 초기 파일 세팅
 if not os.path.exists(SCHOOL_FILE):
     pd.DataFrame({"school_name": ["좌야초등학교", "왕지초등학교", "신대초등학교"]}).to_csv(SCHOOL_FILE, index=False, encoding='utf-8-sig')
 
@@ -75,7 +70,7 @@ def reset_student_session():
     for k in ['claim', 'reason', 'counter', 'draft_1', 'socratic_question', 'final_draft', 'growth_report', 'ai_score']:
         if k in st.session_state: del st.session_state[k]
 
-# --- [사이드바 메뉴] ---
+# 사이드바
 with st.sidebar:
     st.title("🎓 에듀씽크 센터")
     menu = st.radio(
@@ -87,13 +82,12 @@ with st.sidebar:
     admin_pw = st.text_input("관리자 비밀번호", type="password", placeholder="1234")
     is_admin = (admin_pw == "1234")
     if is_admin: st.success("👑 관리자 권한 활성화됨")
-    
     st.markdown("---")
     if api_connected: st.success("🟢 AI 엔진 가동 중")
     else: st.error("🔴 AI 엔진 설정 필요")
 
 # ==============================================================================
-# 1. [학생] 생각 징검다리 글쓰기
+# 1. [학생] 글쓰기
 # ==============================================================================
 if menu == "📝 [학생] 생각 징검다리 글쓰기":
     st.header("📝 생각 징검다리: 서논술형 쓰기 훈련")
@@ -204,11 +198,11 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
             if st.button("✨ 다른 논제 도전하기"): reset_student_session(); st.rerun()
 
 # ==============================================================================
-# 2. [학급] 생각 나눔 & 인터랙티브 사다리 게임
+# 2. [학급] 생각 나눔터 & 긴장감 100% 블라인드 사다리 게임
 # ==============================================================================
 elif menu == "🏆 [학급] 생각 나눔 & 오늘의 작가":
-    st.header("🏆 우리 반 생각 나눔터 & 인터랙티브 사다리 게임")
-    st.caption("학생들의 글을 함께 발표하고, AI가 뽑은 오늘의 작가들과 실시간 사다리 타기를 진행해보세요!")
+    st.header("🏆 우리 반 생각 나눔터 & 오늘의 작가")
+    st.caption("학생들의 글을 함께 발표하고, 가려진 블라인드 사다리 게임으로 당첨의 긴장감을 만끽하세요!")
     
     df_submissions = load_csv_safe(SUBMISSION_FILE)
     if df_submissions is not None and not df_submissions.empty:
@@ -242,35 +236,31 @@ elif menu == "🏆 [학급] 생각 나눔 & 오늘의 작가":
             st.subheader("📖 생각 공유 스크린")
             if st.session_state.selected_sub_idx is not None and st.session_state.selected_sub_idx in df_submissions.index:
                 sel_row = df_submissions.loc[st.session_state.selected_sub_idx]
-                
                 if is_admin:
-                    # 관리자 모드: 학생 명단 및 글 직접 수정 및 삭제
-                    st.markdown(f"#### ✏️ [교사 모드] {sel_row['student_name']} 학생 글 수정 및 관리")
+                    st.markdown(f"#### ✏️ [교사 모드] {sel_row['student_name']} 학생 글 수정/관리")
                     with st.form(key=f"edit_sub_form_{st.session_state.selected_sub_idx}"):
                         edit_name = st.text_input("학생 이름", value=sel_row['student_name'])
-                        edit_draft = st.text_area("학생이 작성한 글", value=sel_row['final_draft'], height=160)
-                        edit_growth = st.text_area("AI 분석/피드백", value=sel_row['growth_report'], height=80)
+                        edit_draft = st.text_area("학생 글", value=sel_row['final_draft'], height=150)
+                        edit_growth = st.text_area("AI 피드백", value=sel_row['growth_report'], height=80)
                         edit_score = st.text_input("AI 점수", value=sel_row['score'])
-                        
-                        btn_c1, btn_c2 = st.columns(2)
-                        with btn_c1:
+                        bc1, bc2 = st.columns(2)
+                        with bc1:
                             if st.form_submit_button("💾 수정 내용 저장", type="primary"):
                                 df_submissions.at[st.session_state.selected_sub_idx, 'student_name'] = edit_name
                                 df_submissions.at[st.session_state.selected_sub_idx, 'final_draft'] = edit_draft
                                 df_submissions.at[st.session_state.selected_sub_idx, 'growth_report'] = edit_growth
                                 df_submissions.at[st.session_state.selected_sub_idx, 'score'] = edit_score
                                 df_submissions.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
-                                st.success("수정 완료되었습니다!"); st.rerun()
-                        with btn_c2:
+                                st.success("수정 완료!"); st.rerun()
+                        with bc2:
                             if st.form_submit_button("🗑️ 이 글 삭제"):
                                 df_submissions = df_submissions.drop(index=st.session_state.selected_sub_idx)
                                 df_submissions.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
                                 st.session_state.selected_sub_idx = None
-                                st.success("삭제 완료되었습니다!"); st.rerun()
+                                st.success("삭제 완료!"); st.rerun()
                 else:
-                    # 일반 학생/수업 모드
                     st.markdown(f"### {sel_row['student_name']} 학생의 생각")
-                    st.caption(f"논제: {sel_row['topic']} / 제출시간: {sel_row['timestamp']}")
+                    st.caption(f"논제: {sel_row['topic']} / 제출: {sel_row['timestamp']}")
                     with st.container(border=True):
                         st.markdown(f"**{sel_row['final_draft']}**")
                     with st.expander("🤖 AI 분석 결과 보기"):
@@ -278,220 +268,246 @@ elif menu == "🏆 [학급] 생각 나눔 & 오늘의 작가":
             else:
                 st.info("좌측 학생 목록에서 이름을 클릭하면 작성한 글이 표시됩니다.")
 
-        # --- [실제 인터랙티브 사다리 타기 게임] ---
-        st.markdown("---")
-        st.header("🎯 실시간 인터랙티브 사다리 타기 게임")
-        st.caption("참가 인원과 이름을 지정하고, 이름을 클릭하면 선을 따라 실제로 내려가는 사다리 게임입니다!")
+        # --- [접을 수 있는 사다리 게임 전용 아코디언] ---
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("🎪 [클릭하여 열기] 오늘의 작가 행운의 사다리 타기 게임 🎲", expanded=False):
+            st.markdown("#### ⚙️ 사다리 게임 설정")
+            
+            # 우수 학생 자동 추천 리스트
+            f_df['num_score'] = pd.to_numeric(f_df['score'], errors='coerce').fillna(0)
+            top_candidates = f_df.sort_values(by="num_score", ascending=False)['student_name'].tolist()
 
-        # 우수 작가 추천 후보군 추출
-        f_df['num_score'] = pd.to_numeric(f_df['score'], errors='coerce').fillna(0)
-        top_candidates = f_df.sort_values(by="num_score", ascending=False)['student_name'].tolist()
+            col_cnt, _ = st.columns([1, 2])
+            with col_cnt:
+                ladder_count = st.number_input("참가 인원수 선택 (2~8명)", min_value=2, max_value=8, value=min(4, max(2, len(f_df))))
 
-        c_lad1, c_lad2 = st.columns([1, 2])
-        with c_lad1:
-            ladder_count = st.number_input("사다리 인원수 (2~8명)", min_value=2, max_value=8, value=min(4, max(2, len(f_df))))
-        with c_lad2:
-            default_names = ", ".join(top_candidates[:ladder_count]) if len(top_candidates) >= ladder_count else "학생A, 학생B, 학생C, 학생D"
-            names_input = st.text_input("참가자 이름 (쉼표로 구분, 직접 수정 가능)", value=default_names)
+            st.markdown("##### 👥 참가자 이름 & 🎁 선물 개별 슬롯 입력")
+            names_list = []
+            prizes_list = []
+            default_prizes = ["🥇 1등 선물", "🍬 달콤한 사탕", "🍫 초콜릿", "👏 힘찬 박수", "🌟 칭찬 스티커", "🧃 맛있는 음료", "🍪 맛있는 쿠키", "😄 따뜻한 미소"]
 
-        prizes_default = "1등 선물, 달콤한 간식, 비타민, 힘찬 박수, 초콜릿, 칭찬 스티커, 음료수, 미소"
-        prizes_user = st.text_input("하단 당첨 선물 목록 (쉼표로 구분)", value=prizes_default)
+            # 인원수만큼 개별 입력 슬롯 생성 (쉼표 없이 직관적 입력)
+            slot_cols = st.columns(ladder_count)
+            for i in range(ladder_count):
+                with slot_cols[i]:
+                    st.caption(f"라인 {i+1}")
+                    def_name = top_candidates[i] if i < len(top_candidates) else f"학생{i+1}"
+                    n_val = st.text_input(f"이름 #{i+1}", value=def_name, key=f"lad_name_{i}")
+                    p_val = st.text_input(f"선물 #{i+1}", value=default_prizes[i % len(default_prizes)], key=f"lad_prize_{i}")
+                    names_list.append(n_val.strip() if n_val.strip() else f"학생{i+1}")
+                    prizes_list.append(p_val.strip() if p_val.strip() else f"선물{i+1}")
 
-        names_list = [n.strip() for n in names_input.split(",") if n.strip()][:ladder_count]
-        prizes_list = [p.strip() for p in prizes_user.split(",") if p.strip()][:ladder_count]
-        
-        while len(names_list) < ladder_count: names_list.append(f"참가자{len(names_list)+1}")
-        while len(prizes_list) < ladder_count: prizes_list.append("👏 박수")
+            c_act1, c_act2 = st.columns([1, 4])
+            with c_act1:
+                if st.button("🎲 사다리 선 재배치"):
+                    st.session_state.ladder_seed = random.randint(1, 99999)
+                    st.rerun()
 
-        # 사다리 가로줄 난수 생성 및 세션 보존
-        if "ladder_data" not in st.session_state or st.button("🎲 사다리 새로 섞기 / 리셋"):
-            # 6개 층에 가로줄 랜덤 배치
+            # 사다리 가로줄 생성 로직
+            if "ladder_seed" not in st.session_state:
+                st.session_state.ladder_seed = random.randint(1, 99999)
+
+            rng = random.Random(st.session_state.ladder_seed)
             levels = 6
             bridges = []
             for lvl in range(levels):
-                col = random.randint(0, ladder_count - 2)
-                bridges.append({"level": lvl, "col": col})
-            st.session_state.ladder_data = bridges
+                c_pick = rng.randint(0, ladder_count - 2)
+                bridges.append({"level": lvl, "col": c_pick})
 
-        # HTML5 Canvas 인터랙티브 사다리 게임 컴포넌트 생성
-        ladder_json_bridges = str(st.session_state.ladder_data)
-        names_js = str(names_list)
-        prizes_js = str(prizes_list)
+            # JavaScript에 전달할 데이터
+            bridges_json = str(bridges)
+            names_js = str(names_list)
+            prizes_js = str(prizes_list)
 
-        html_ladder_code = f"""
-        <div style="text-align: center; font-family: sans-serif; background: #ffffff; padding: 20px; border-radius: 12px; border: 2px solid #e0e6ed;">
-            <p style="color: #2b6cb0; font-weight: bold; font-size: 16px; margin-bottom: 8px;">👇 상단의 학생 이름을 클릭하면 사다리를 타고 내려갑니다!</p>
-            <canvas id="ladderCanvas" width="700" height="420" style="border: 1px solid #ddd; background: #fdfdfd; border-radius: 8px;"></canvas>
-            <div id="resultText" style="margin-top: 12px; font-size: 18px; font-weight: bold; color: #d9534f; height: 30px;"></div>
-        </div>
+            html_blind_ladder = f"""
+            <div style="text-align: center; font-family: 'Pretendard', sans-serif; background: #f8fafc; padding: 25px; border-radius: 16px; border: 2px solid #cbd5e1; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                <div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 15px;">
+                    <button id="btnReveal" onclick="startReveal()" style="padding: 12px 28px; font-size: 16px; font-weight: bold; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer; transition: 0.2s;">🚀 사다리 공개 및 출발!</button>
+                    <button id="btnReset" onclick="resetGame()" style="padding: 12px 20px; font-size: 15px; font-weight: bold; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer;">🔄 다시 가리기 (리셋)</button>
+                </div>
+                <p id="guideText" style="color: #475569; font-weight: 600; margin-bottom: 12px; font-size: 15px;">🔒 가림막으로 경로가 숨겨져 있습니다. [사다리 공개 및 출발]을 누르면 시작됩니다!</p>
+                <div style="position: relative; display: inline-block;">
+                    <canvas id="ladderCanvas" width="760" height="430" style="background: #ffffff; border: 2px solid #e2e8f0; border-radius: 12px;"></canvas>
+                </div>
+                <div id="resultBanner" style="margin-top: 15px; font-size: 19px; font-weight: bold; color: #1e293b; min-height: 35px;"></div>
+                <div id="summaryTable" style="margin-top: 15px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;"></div>
+            </div>
 
-        <script>
-            const canvas = document.getElementById("ladderCanvas");
-            const ctx = canvas.getContext("2d");
-            const numCols = {ladder_count};
-            const names = {names_js};
-            const prizes = {prizes_js};
-            const bridges = {ladder_json_bridges};
-            const levels = 6;
+            <script>
+                const canvas = document.getElementById("ladderCanvas");
+                const ctx = canvas.getContext("2d");
+                const numCols = {ladder_count};
+                const names = {names_js};
+                const prizes = {prizes_js};
+                const bridges = {bridges_json};
+                const levels = 6;
 
-            const startY = 60;
-            const endY = 360;
-            const colWidth = (canvas.width - 120) / (numCols - 1);
-            const levelHeight = (endY - startY) / levels;
+                const startY = 65;
+                const endY = 365;
+                const colWidth = (canvas.width - 140) / (numCols - 1);
+                const levelHeight = (endY - startY) / levels;
 
-            function getColX(col) {{
-                return 60 + col * colWidth;
-            }}
-            function getLevelY(lvl) {{
-                return startY + lvl * levelHeight + (levelHeight / 2);
-            }}
+                let isRevealed = false;
+                let activeAnimations = 0;
 
-            function drawBoard() {{
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.lineWidth = 4;
-                ctx.strokeStyle = "#4a5568";
-                ctx.fillStyle = "#2d3748";
-                ctx.font = "bold 15px sans-serif";
-                ctx.textAlign = "center";
+                function getColX(col) {{ return 70 + col * colWidth; }}
+                function getLevelY(lvl) {{ return startY + lvl * levelHeight + (levelHeight / 2); }}
 
-                // 세로줄 및 이름, 선물 그리기
-                for (let i = 0; i < numCols; i++) {{
-                    let x = getColX(i);
-                    ctx.beginPath();
-                    ctx.moveTo(x, startY);
-                    ctx.lineTo(x, endY);
-                    ctx.stroke();
+                function drawBase() {{
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // 세로선
+                    ctx.lineWidth = 4;
+                    ctx.strokeStyle = "#94a3b8";
+                    for (let i = 0; i < numCols; i++) {{
+                        let x = getColX(i);
+                        ctx.beginPath();
+                        ctx.moveTo(x, startY);
+                        ctx.lineTo(x, endY);
+                        ctx.stroke();
 
-                    // 이름 박스
-                    ctx.fillStyle = "#ebf8ff";
-                    ctx.fillRect(x - 45, 12, 90, 36);
-                    ctx.strokeStyle = "#3182ce";
-                    ctx.strokeRect(x - 45, 12, 90, 36);
-                    ctx.fillStyle = "#2b6cb0";
-                    ctx.fillText(names[i], x, 35);
+                        // 상단 이름 박스
+                        ctx.fillStyle = "#eff6ff";
+                        ctx.fillRect(x - 45, 12, 90, 38);
+                        ctx.strokeStyle = "#3b82f6";
+                        ctx.strokeRect(x - 45, 12, 90, 38);
+                        ctx.fillStyle = "#1e40af";
+                        ctx.font = "bold 15px sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.fillText(names[i], x, 36);
 
-                    // 선물 박스
-                    ctx.fillStyle = "#feebc8";
-                    ctx.fillRect(x - 45, endY + 8, 90, 36);
-                    ctx.strokeStyle = "#dd6b20";
-                    ctx.strokeRect(x - 45, endY + 8, 90, 36);
-                    ctx.fillStyle = "#c05621";
-                    ctx.fillText(prizes[i], x, endY + 31);
-                    ctx.strokeStyle = "#4a5568";
-                }}
+                        // 하단 선물 박스
+                        ctx.fillStyle = isRevealed ? "#fef3c7" : "#334155";
+                        ctx.fillRect(x - 45, endY + 12, 90, 38);
+                        ctx.strokeStyle = isRevealed ? "#f59e0b" : "#1e293b";
+                        ctx.strokeRect(x - 45, endY + 12, 90, 38);
+                        ctx.fillStyle = isRevealed ? "#92400e" : "#ffffff";
+                        ctx.fillText(isRevealed ? prizes[i] : "❓ 당첨", x, endY + 36);
+                    }}
 
-                // 가로줄 그리기
-                ctx.lineWidth = 4;
-                ctx.strokeStyle = "#718096";
-                for (let b of bridges) {{
-                    let x1 = getColX(b.col);
-                    let x2 = getColX(b.col + 1);
-                    let y = getLevelY(b.level);
-                    ctx.beginPath();
-                    ctx.moveTo(x1, y);
-                    ctx.lineTo(x2, y);
-                    ctx.stroke();
-                }}
-            }}
-
-            drawBoard();
-
-            // 사다리 타기 애니메이션
-            let isAnimating = false;
-            canvas.addEventListener("click", function(e) {{
-                if (isAnimating) return;
-                const rect = canvas.getBoundingClientRect();
-                const mouseX = e.clientX - rect.left;
-                const mouseY = e.clientY - rect.top;
-
-                for (let i = 0; i < numCols; i++) {{
-                    let x = getColX(i);
-                    if (mouseX >= x - 45 && mouseX <= x + 45 && mouseY >= 12 && mouseY <= 48) {{
-                        runLadder(i);
-                        break;
+                    // 가로선
+                    if (isRevealed) {{
+                        ctx.lineWidth = 4;
+                        ctx.strokeStyle = "#64748b";
+                        for (let b of bridges) {{
+                            let x1 = getColX(b.col);
+                            let x2 = getColX(b.col + 1);
+                            let y = getLevelY(b.level);
+                            ctx.beginPath();
+                            ctx.moveTo(x1, y);
+                            ctx.lineTo(x2, y);
+                            ctx.stroke();
+                        }}
+                    }} else {{
+                        // 가림막 블라인드 효과
+                        ctx.fillStyle = "rgba(30, 41, 59, 0.93)";
+                        ctx.fillRect(40, startY + 10, canvas.width - 80, endY - startY - 20);
+                        ctx.fillStyle = "#ffffff";
+                        ctx.font = "bold 20px sans-serif";
+                        ctx.fillText("🔒 사다리 선과 결과가 숨겨져 있습니다", canvas.width / 2, (startY + endY) / 2);
                     }}
                 }}
-            }});
 
-            function runLadder(startCol) {{
-                isAnimating = true;
-                drawBoard();
-                let currentCol = startCol;
-                let path = [{{x: getColX(currentCol), y: startY}}];
+                drawBase();
 
-                for (let lvl = 0; lvl < levels; lvl++) {{
-                    let yLvl = getLevelY(lvl);
-                    path.push({{x: getColX(currentCol), y: yLvl}});
-                    
-                    // 가로줄 확인
-                    for (let b of bridges) {{
-                        if (b.level === lvl) {{
-                            if (b.col === currentCol) {{
-                                currentCol++;
-                                path.push({{x: getColX(currentCol), y: yLvl}});
-                                break;
-                            }} else if (b.col === currentCol - 1) {{
-                                currentCol--;
-                                path.push({{x: getColX(currentCol), y: yLvl}});
-                                break;
+                function resetGame() {{
+                    isRevealed = false;
+                    document.getElementById("resultBanner").innerText = "";
+                    document.getElementById("summaryTable").innerHTML = "";
+                    document.getElementById("guideText").innerText = "🔒 가림막으로 경로가 숨겨져 있습니다. [사다리 공개 및 출발]을 누르면 시작됩니다!";
+                    drawBase();
+                }}
+
+                function startReveal() {{
+                    if (isRevealed) return;
+                    isRevealed = true;
+                    drawBase();
+                    document.getElementById("guideText").innerText = "✨ 사다리가 공개되었습니다! 상단 학생 이름을 클릭하거나 자동으로 출발합니다.";
+                    runAllSequential(0);
+                }}
+
+                // 순차적으로 타고 내려가는 애니메이션
+                const colors = ["#ef4444", "#8b5cf6", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#84cc16", "#6366f1"];
+                let finalOutcomes = [];
+
+                function calculatePath(startCol) {{
+                    let c = startCol;
+                    let p = [{{x: getColX(c), y: startY}}];
+                    for (let lvl = 0; lvl < levels; lvl++) {{
+                        let yL = getLevelY(lvl);
+                        p.push({{x: getColX(c), y: yL}});
+                        for (let b of bridges) {{
+                            if (b.level === lvl) {{
+                                if (b.col === c) {{ c++; p.push({{x: getColX(c), y: yL}}); break; }}
+                                else if (b.col === c - 1) {{ c--; p.push({{x: getColX(c), y: yL}}); break; }}
                             }}
                         }}
                     }}
+                    p.push({{x: getColX(c), y: endY}});
+                    return {{path: p, finalCol: c}};
                 }}
-                path.push({{x: getColX(currentCol), y: endY}});
 
-                // 선 애니메이션 그리기
-                let pIdx = 0;
-                let curPos = {{x: path[0].x, y: path[0].y}};
-                ctx.strokeStyle = "#e53e3e";
-                ctx.lineWidth = 6;
-
-                function animate() {{
-                    if (pIdx >= path.length - 1) {{
-                        document.getElementById("resultText").innerText = "🎉 [" + names[startCol] + "] ➡️ [" + prizes[currentCol] + "] 당첨 축하합니다!";
-                        isAnimating = false;
+                function runAllSequential(colIndex) {{
+                    if (colIndex >= numCols) {{
+                        showSummary();
                         return;
                     }}
-                    let target = path[pIdx + 1];
-                    let dx = target.x - curPos.x;
-                    let dy = target.y - curPos.y;
-                    let dist = Math.hypot(dx, dy);
+                    let res = calculatePath(colIndex);
+                    finalOutcomes.push({{name: names[colIndex], prize: prizes[res.finalCol]}});
+                    document.getElementById("resultBanner").innerHTML = "🏃 <b>[" + names[colIndex] + "]</b> 학생이 사다리를 타고 내려가는 중...";
 
-                    if (dist < 6) {{
-                        curPos.x = target.x;
-                        curPos.y = target.y;
-                        pIdx++;
-                    }} else {{
-                        curPos.x += (dx / dist) * 6;
-                        curPos.y += (dy / dist) * 6;
+                    let p = res.path;
+                    let pIdx = 0;
+                    let cur = {{x: p[0].x, y: p[0].y}};
+                    ctx.strokeStyle = colors[colIndex % colors.length];
+                    ctx.lineWidth = 5;
+
+                    function anim() {{
+                        if (pIdx >= p.length - 1) {{
+                            setTimeout(() => {{ runAllSequential(colIndex + 1); }}, 600);
+                            return;
+                        }}
+                        let target = p[pIdx + 1];
+                        let dx = target.x - cur.x;
+                        let dy = target.y - cur.y;
+                        let dist = Math.hypot(dx, dy);
+                        if (dist < 8) {{
+                            cur.x = target.x; cur.y = target.y; pIdx++;
+                        }} else {{
+                            cur.x += (dx / dist) * 8;
+                            cur.y += (dy / dist) * 8;
+                        }}
+                        ctx.beginPath();
+                        ctx.moveTo(p[pIdx].x, p[pIdx].y);
+                        ctx.lineTo(cur.x, cur.y);
+                        ctx.stroke();
+                        requestAnimationFrame(anim);
                     }}
-
-                    ctx.beginPath();
-                    ctx.moveTo(path[pIdx].x, path[pIdx].y);
-                    ctx.lineTo(curPos.x, curPos.y);
-                    ctx.stroke();
-
-                    requestAnimationFrame(animate);
+                    anim();
                 }}
-                document.getElementById("resultText").innerText = names[startCol] + " 학생 사다리 타고 내려가는 중... 🏃";
-                animate();
-            }}
-        </script>
-        """
-        components.html(html_ladder_code, height=500)
 
+                function showSummary() {{
+                    document.getElementById("resultBanner").innerHTML = "🎉 <b>모든 사다리 타기 완료!</b> 아래 결과를 확인하세요!";
+                    let html = "";
+                    finalOutcomes.forEach((item, idx) => {{
+                        html += "<div style='background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'><b style='color:#1e40af;'>" + item.name + "</b> ➡️ <span style='color:#b45309; font-weight:bold;'>" + item.prize + "</span></div>";
+                    }});
+                    document.getElementById("summaryTable").innerHTML = html;
+                }}
+            </script>
+            """
+            components.html(html_blind_ladder, height=580)
     else:
         st.info("현재 제출된 글이 없습니다.")
 
 # ==============================================================================
-# 3. [선생님] Agent C 루브릭 관리 (수정/삭제 유지)
+# 3. [선생님] 루브릭 관리
 # ==============================================================================
 elif menu == "🧠 [선생님] Agent C 루브릭 관리":
     st.header("🧠 Agent C: 교과/학년별 루브릭 통합 관리")
-    if not is_admin: st.warning("🔒 수정 및 삭제는 좌측 관리자 비밀번호를 입력해야 가능합니다.")
+    if not is_admin: st.warning("🔒 수정 및 삭제는 관리자 비밀번호가 필요합니다.")
     df_rubrics = load_csv_safe(RUBRIC_FILE)
-    
-    tab1, tab2 = st.tabs(["📋 루브릭 목록 및 수정/삭제", "➕ 신규 루브릭 등록"])
+    tab1, tab2 = st.tabs(["📋 목록 및 수정/삭제", "➕ 등록"])
     with tab1:
         if df_rubrics is not None and not df_rubrics.empty:
             for original_idx, row in df_rubrics.iterrows():
@@ -510,13 +526,12 @@ elif menu == "🧠 [선생님] Agent C 루브릭 관리":
                                     df_rubrics.at[original_idx, 'grade'] = eg; df_rubrics.at[original_idx, 'theme'] = eth
                                     df_rubrics.at[original_idx, 'title'] = eti; df_rubrics.at[original_idx, 'criteria'] = ec
                                     df_rubrics.at[original_idx, 'scoring_criteria'] = es; df_rubrics.at[original_idx, 'good_example'] = eex
-                                    df_rubrics.to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig'); st.success("저장 완료"); st.rerun()
+                                    df_rubrics.to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig'); st.success("수정 완료"); st.rerun()
                             with c2:
                                 if st.form_submit_button("🗑️ 삭제", type="primary"):
                                     df_rubrics = df_rubrics.drop(index=original_idx).to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
                                     st.success("삭제 완료"); st.rerun()
-                    else:
-                        st.markdown(f"**기준:** {row['criteria']}\n\n**배점:** {row['scoring_criteria']}")
+                    else: st.markdown(f"**기준:** {row['criteria']}\n\n**배점:** {row['scoring_criteria']}")
     with tab2:
         ng = st.selectbox("학년군", ["1-2학년", "3-4학년", "5-6학년", "공통"])
         nth = st.selectbox("교과", ["사회/환경", "과학/기술", "국어/독서", "도덕/인성", "자유"])
@@ -530,18 +545,17 @@ elif menu == "🧠 [선생님] Agent C 루브릭 관리":
             st.success("등록 완료"); st.rerun()
 
 # ==============================================================================
-# 4. [선생님] 제출 현황 대시보드
+# 4. [선생님] 대시보드
 # ==============================================================================
 elif menu == "📊 [선생님] 제출 현황 대시보드":
     st.header("📊 제출 현황 및 채점 대시보드")
-    if not is_admin: st.warning("🔒 엑셀 다운로드 및 수정/삭제는 좌측 관리자 비밀번호를 입력해야 가능합니다.")
+    if not is_admin: st.warning("🔒 관리자 권한이 필요합니다.")
     df_submissions = load_csv_safe(SUBMISSION_FILE)
     if df_submissions is not None and not df_submissions.empty:
         filtered_df = df_submissions.copy()
         filtered_df.insert(0, '선택', False)
         dc = ['선택', 'timestamp', 'school', 'grade', 'class_num', 'student_name', 'topic', 'score', 'teacher_score', 'final_draft', 'growth_report'] if is_admin else ['선택', 'timestamp', 'school', 'grade', 'class_num', 'student_name', 'topic', 'final_draft', 'growth_report']
         cc = {"선택": st.column_config.CheckboxColumn("선택"), "score": st.column_config.TextColumn("🤖 AI 점수", disabled=True), "teacher_score": st.column_config.TextColumn("👩‍🏫 교사 점수 (더블클릭)")} if is_admin else {"선택": st.column_config.CheckboxColumn("선택")}
-        
         edited_df = st.data_editor(filtered_df[dc], column_config=cc, hide_index=True, use_container_width=True)
         sel_rows = edited_df[edited_df['선택'] == True]
         if is_admin:
