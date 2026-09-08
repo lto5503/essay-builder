@@ -17,6 +17,16 @@ if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     api_connected = True
 
+# --- [안전한 CSV 로드 함수 (EmptyDataError 완벽 방어)] ---
+def load_csv_safe(file_path):
+    if not os.path.exists(file_path):
+        return None
+    try:
+        df = pd.read_csv(file_path)
+        return df
+    except pd.errors.EmptyDataError:
+        return None
+
 # --- [초기 파일 세팅 및 스키마 자동 업데이트] ---
 if not os.path.exists(SCHOOL_FILE):
     pd.DataFrame({"school_name": ["좌야초등학교", "왕지초등학교", "신대초등학교"]}).to_csv(SCHOOL_FILE, index=False, encoding='utf-8-sig')
@@ -33,8 +43,9 @@ if not os.path.exists(RUBRIC_FILE):
     ])
     df_init_rubric.to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
 
-if os.path.exists(SUBMISSION_FILE):
-    df_s = pd.read_csv(SUBMISSION_FILE)
+# 제출 파일 스키마 점검
+df_s = load_csv_safe(SUBMISSION_FILE)
+if df_s is not None and not df_s.empty:
     changed = False
     for col in ['school', 'grade', 'class_num', 'score', 'teacher_score']:
         if col not in df_s.columns:
@@ -42,6 +53,8 @@ if os.path.exists(SUBMISSION_FILE):
             changed = True
     if changed:
         df_s.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
+elif os.path.exists(SUBMISSION_FILE):
+    os.remove(SUBMISSION_FILE) # 오류를 일으키는 0바이트 빈 파일 찌꺼기 삭제
 
 def reset_student_session():
     st.session_state.step = 1
@@ -84,17 +97,17 @@ with st.sidebar:
         st.error("🔴 AI 엔진 설정 필요")
 
 # ==============================================================================
-# 1. [학생] 생각 징검다리 글쓰기 (기존 동일하므로 UI만 축약 반영)
+# 1. [학생] 생각 징검다리 글쓰기
 # ==============================================================================
 if menu == "📝 [학생] 생각 징검다리 글쓰기":
     st.header("📝 생각 징검다리: 서논술형 쓰기 훈련")
     
-    df_rubrics = pd.read_csv(RUBRIC_FILE)
-    df_schools = pd.read_csv(SCHOOL_FILE)
+    df_rubrics = load_csv_safe(RUBRIC_FILE)
+    df_schools = load_csv_safe(SCHOOL_FILE)
     
     col_t1, col_t2 = st.columns([4, 1])
     with col_t1:
-        selected_topic = st.selectbox("📌 논제 선택:", df_rubrics["title"].tolist(), key="selected_topic_box")
+        selected_topic = st.selectbox("📌 논제 선택:", df_rubrics["title"].tolist() if df_rubrics is not None else [], key="selected_topic_box")
     with col_t2:
         st.write("")
         st.write("")
@@ -109,8 +122,11 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
         reset_student_session()
         st.rerun()
 
-    current_rubric = df_rubrics[df_rubrics["title"] == selected_topic].iloc[0]
-    scoring_crit = current_rubric.get("scoring_criteria", "논리성, 표현력 평가")
+    if df_rubrics is not None and not df_rubrics.empty:
+        current_rubric = df_rubrics[df_rubrics["title"] == selected_topic].iloc[0]
+        scoring_crit = current_rubric.get("scoring_criteria", "논리성, 표현력 평가")
+    else:
+        scoring_crit = "설정된 기준 없음"
 
     if "step" not in st.session_state: st.session_state.step = 1
     steps = ["1. 주장", "2. 근거", "3. 반론 극복", "4. AI 질문", "5. 다듬기 및 제출"]
@@ -187,7 +203,7 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
         
         st.markdown("### 📝 제출자 정보 입력")
         sc1, sc2, sc3, sc4 = st.columns(4)
-        with sc1: school = st.selectbox("학교", df_schools['school_name'].tolist())
+        with sc1: school = st.selectbox("학교", df_schools['school_name'].tolist() if df_schools is not None else ["등록된 학교 없음"])
         with sc2: grade = st.selectbox("학년", [str(i)+"학년" for i in range(1, 7)])
         with sc3: class_num = st.selectbox("반", [str(i)+"반" for i in range(1, 16)])
         with sc4: student_name = st.text_input("이름")
@@ -209,14 +225,17 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
 elif menu == "🧠 [선생님] Agent C 루브릭 금고":
     st.header("🧠 Agent C: 기준 학습용 루브릭 금고")
     tab1, tab2 = st.tabs(["📋 등록된 루브릭 목록", "➕ 신규 루브릭 등록"])
-    df_rubrics = pd.read_csv(RUBRIC_FILE)
+    df_rubrics = load_csv_safe(RUBRIC_FILE)
 
     with tab1:
-        for _, row in df_rubrics.iterrows():
-            with st.expander(f"📌 [{row['id']}] {row['title']}"):
-                st.markdown(f"**🎯 AI 방향성(꼬리질문) 기준:** {row['criteria']}")
-                st.markdown(f"**💯 100점 채점 배점표:** {row.get('scoring_criteria', '미설정')}")
-                st.markdown(f"**📝 모범 답안 예시:** {row['good_example']}")
+        if df_rubrics is not None and not df_rubrics.empty:
+            for _, row in df_rubrics.iterrows():
+                with st.expander(f"📌 [{row['id']}] {row['title']}"):
+                    st.markdown(f"**🎯 AI 방향성(꼬리질문) 기준:** {row['criteria']}")
+                    st.markdown(f"**💯 100점 채점 배점표:** {row.get('scoring_criteria', '미설정')}")
+                    st.markdown(f"**📝 모범 답안 예시:** {row['good_example']}")
+        else:
+            st.info("등록된 루브릭이 없습니다.")
 
     with tab2:
         new_title = st.text_input("논제/주제명")
@@ -226,10 +245,12 @@ elif menu == "🧠 [선생님] Agent C 루브릭 금고":
 
         if st.button("💾 루브릭 저장"):
             if new_title and new_criteria and new_scoring:
-                new_data = {"id": len(df_rubrics) + 1, "title": new_title, "good_example": new_example, "criteria": new_criteria, "scoring_criteria": new_scoring}
-                pd.concat([df_rubrics, pd.DataFrame([new_data])], ignore_index=True).to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
-                st.success("저장 완료!")
-                st.rerun()
+                new_data = {"id": len(df_rubrics) + 1 if df_rubrics is not None else 1, "title": new_title, "good_example": new_example, "criteria": new_criteria, "scoring_criteria": new_scoring}
+                if df_rubrics is not None:
+                    pd.concat([df_rubrics, pd.DataFrame([new_data])], ignore_index=True).to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
+                else:
+                    pd.DataFrame([new_data]).to_csv(RUBRIC_FILE, index=False, encoding='utf-8-sig')
+                st.success("저장 완료!"); st.rerun()
 
 # ==============================================================================
 # 3. [선생님] 학생 제출 및 채점 현황 대시보드
@@ -244,17 +265,24 @@ elif menu == "📊 [선생님] 학생 제출 및 채점 현황":
     
     with tab_school:
         st.subheader("등록된 학교 목록")
-        df_schools = pd.read_csv(SCHOOL_FILE)
-        st.write(", ".join(df_schools['school_name'].tolist()))
+        df_schools = load_csv_safe(SCHOOL_FILE)
+        if df_schools is not None and not df_schools.empty:
+            st.write(", ".join(df_schools['school_name'].tolist()))
+        
         new_school = st.text_input("새로운 학교 이름 추가")
         if st.button("➕ 학교 추가"):
-            if new_school.strip() and new_school not in df_schools['school_name'].values:
-                pd.concat([df_schools, pd.DataFrame([{"school_name": new_school}])], ignore_index=True).to_csv(SCHOOL_FILE, index=False, encoding='utf-8-sig')
-                st.success("학교 추가 완료!"); st.rerun()
+            if new_school.strip():
+                if df_schools is not None:
+                    if new_school not in df_schools['school_name'].values:
+                        pd.concat([df_schools, pd.DataFrame([{"school_name": new_school}])], ignore_index=True).to_csv(SCHOOL_FILE, index=False, encoding='utf-8-sig')
+                        st.success("학교 추가 완료!"); st.rerun()
+                else:
+                    pd.DataFrame([{"school_name": new_school}]).to_csv(SCHOOL_FILE, index=False, encoding='utf-8-sig')
+                    st.success("학교 추가 완료!"); st.rerun()
 
     with tab_dash:
-        if os.path.exists(SUBMISSION_FILE):
-            df_submissions = pd.read_csv(SUBMISSION_FILE)
+        df_submissions = load_csv_safe(SUBMISSION_FILE)
+        if df_submissions is not None and not df_submissions.empty:
             
             # --- [스마트 필터링] ---
             f1, f2, f3, f4 = st.columns(4)
@@ -269,12 +297,9 @@ elif menu == "📊 [선생님] 학생 제출 및 채점 현황":
             if cls_filter != "전체": filtered_df = filtered_df[filtered_df['class_num'] == cls_filter]
             if name_filter: filtered_df = filtered_df[filtered_df['student_name'].str.astype(str).str.contains(name_filter, na=False)]
 
-            # UI용 체크박스 열 생성
             filtered_df.insert(0, '선택', False)
-            
             st.markdown(f"**총 검색 결과: {len(filtered_df)}건**")
 
-            # --- [관리자 여부에 따른 테이블 칼럼 구성] ---
             if is_admin:
                 display_cols = ['선택', 'timestamp', 'school', 'grade', 'class_num', 'student_name', 'topic', 'score', 'teacher_score', 'final_draft', 'growth_report']
                 column_config = {
@@ -304,37 +329,30 @@ elif menu == "📊 [선생님] 학생 제출 및 채점 현황":
                     "growth_report": st.column_config.TextColumn("AI 분석", disabled=True)
                 }
 
-            # 데이터 에디터 렌더링
             edited_df = st.data_editor(filtered_df[display_cols], column_config=column_config, hide_index=True, use_container_width=True)
-            
-            # 선택된 행 추출
             selected_rows = edited_df[edited_df['선택'] == True]
 
-            # --- [관리자 전용 액션 버튼] ---
             if is_admin:
                 act1, act2, act3 = st.columns(3)
-                
                 with act1:
                     if not selected_rows.empty:
                         export_df = selected_rows.drop(columns=['선택'])
                         st.download_button("📥 선택 항목 엑셀 다운로드", data=export_df.to_csv(index=False).encode('utf-8-sig'), file_name=f"selected_reports_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
-                        
                 with act2:
                     if st.button("💾 수정한 교사 점수 저장하기"):
                         for idx, row in edited_df.iterrows():
-                            # 수정된 교사 점수를 원본 데이터 프레임에 반영
                             df_submissions.loc[df_submissions['timestamp'] == row['timestamp'], 'teacher_score'] = row['teacher_score']
                         df_submissions.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
-                        st.success("교사 점수가 저장되었습니다.")
-                        st.rerun()
-                        
+                        st.success("교사 점수가 저장되었습니다."); st.rerun()
                 with act3:
                     if not selected_rows.empty:
                         if st.button("🗑️ 선택 항목 완전 삭제", type="primary"):
                             timestamps_to_delete = selected_rows['timestamp'].tolist()
                             df_submissions = df_submissions[~df_submissions['timestamp'].isin(timestamps_to_delete)]
-                            df_submissions.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
-                            st.success("해당 데이터가 영구 삭제되었습니다.")
-                            st.rerun()
+                            if df_submissions.empty:
+                                os.remove(SUBMISSION_FILE)
+                            else:
+                                df_submissions.to_csv(SUBMISSION_FILE, index=False, encoding='utf-8-sig')
+                            st.success("선택한 데이터가 영구 삭제되었습니다."); st.rerun()
         else:
-            st.info("제출된 답안이 없습니다.")
+            st.info("현재 제출된 답안 기록이 없습니다. (새로 제출하시면 표가 나타납니다)")
