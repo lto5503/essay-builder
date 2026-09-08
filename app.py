@@ -118,7 +118,7 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
 
                     with st.spinner("AI 튜터가 글의 논리를 정밀 분석 중입니다..."):
                         try:
-                            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+                            model = genai.GenerativeModel('gemini-2.5-flash')
                             prompt = f"""
                             당신은 초등학생의 논리적 사고를 키워주는 소크라테스 교사입니다.
                             [교사 기준/루브릭]: {current_rubric['criteria']}
@@ -159,7 +159,7 @@ if menu == "📝 [학생] 생각 징검다리 글쓰기":
                     st.session_state.final_draft = final_draft
                     with st.spinner("AI가 초안 대비 성장을 분석 중입니다..."):
                         try:
-                            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+                            model = genai.GenerativeModel('gemini-2.5-flash')
                             eval_prompt = f"""
                             초등학생의 글쓰기 수정 전/후 성장 보고서를 작성해 주세요.
                             [초안]: {st.session_state.draft_1}
